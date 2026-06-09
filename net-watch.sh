@@ -1,25 +1,42 @@
 #!/bin/bash
 
-clear
+set -euo pipefail
 
-# Define exactly which columns to show (Process name and Type are always shown by default)
 CLEAN_COLUMNS="bytes_in,bytes_out,rcvsize,tc_class"
 
-if [ -z "$1" ]; then
+show_help() {
+    cat <<'EOF'
+Usage: net-watch.sh [app-name]
+
+Without arguments, shows live network usage for the whole system.
+With an app/process name, filters the view to that process.
+EOF
+}
+
+APP_NAME="${1:-}"
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    show_help
+    exit 0
+fi
+
+if [ -t 1 ]; then
+    clear
+fi
+
+if [ -z "$APP_NAME" ]; then
     echo "=========================================================="
     echo " Monitoring WHOLE SYSTEM"
     echo " Press Control + C to exit"
     echo "=========================================================="
     echo ""
-    # Run nettop showing ONLY the specific columns
-    nettop -J $CLEAN_COLUMNS
-else
-    PROCESS_NAME=$1
-    echo "=========================================================="
-    echo " Monitoring SPECIFIC Process: [$PROCESS_NAME]"
-    echo " Press Control + C to exit"
-    echo "=========================================================="
-    echo ""
-    # Filter by process and show ONLY the specific columns
-    nettop -p "$PROCESS_NAME" -J $CLEAN_COLUMNS
+    exec nettop -J "$CLEAN_COLUMNS"
 fi
+
+echo "=========================================================="
+echo " Monitoring APP/PROCESS: [$APP_NAME]"
+echo " Press Control + C to exit"
+echo "=========================================================="
+echo ""
+
+exec nettop -p "$APP_NAME" -J "$CLEAN_COLUMNS"

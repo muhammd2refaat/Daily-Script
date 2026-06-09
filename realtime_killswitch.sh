@@ -1,37 +1,66 @@
 #!/bin/bash
 
 # --- CONFIGURATION ---
-LIMIT_MB=5
+
+# 1. Read the command-line argument OR set a default
+if [ -n "$1" ]; then
+    if [[ "$1" =~ ^[0-9]+$ ]]; then
+        LIMIT_MB=$1
+    else
+        echo "Error: The limit must be a number."
+        echo "Usage: ./netwatch.sh [Megabytes]"
+        exit 1
+    fi
+else
+    LIMIT_MB=5 # Default to 5 MB
+fi
+
 INTERFACE="en0" # en0 is standard Mac Wi-Fi
 LIMIT_BYTES=$((LIMIT_MB * 1024 * 1024))
 
-echo "Fetching starting data..."
+echo "Connecting to Wi-Fi hardware..."
 
-# 1. THE BASELINE: The script memorizes exactly how much data you've used today BEFORE the loop starts.
-START_BYTES=$(vnstat -i $INTERFACE --json d 2>/dev/null | jq '.interfaces[0].traffic.day[0].rx + .interfaces[0].traffic.day[0].tx')
+# Function to read live byte counts directly from the Wi-Fi card
+get_live_bytes() {
+    # netstat -I en0 -b prints hardware data. We grab the Link row and add Input Bytes + Output Bytes
+    netstat -I "$INTERFACE" -b | awk '/<Link#/ {print $7 + $10}'
+}
+
+# 2. THE BASELINE: Memorize the hardware state right now
+START_BYTES=$(get_live_bytes)
+
+if [ -z "$START_BYTES" ]; then
+    echo "Error: Could not read from $INTERFACE. Is Wi-Fi turned on?"
+    exit 1
+fi
 
 echo "Session monitor active. Starting fresh from 0 MB. Limit: $LIMIT_MB MB."
 
 while true; do
-    # 2. THE CURRENT TOTAL: Fetch the new total every second
-    CURRENT_BYTES=$(vnstat -i $INTERFACE --json d 2>/dev/null | jq '.interfaces[0].traffic.day[0].rx + .interfaces[0].traffic.day[0].tx')
+    # 3. THE CURRENT TOTAL: Fetch live hardware bytes every second
+    CURRENT_BYTES=$(get_live_bytes)
 
-    if [ -n "$CURRENT_BYTES" ] && [ "$CURRENT_BYTES" != "null" ]; then
+    if [ -n "$CURRENT_BYTES" ]; then
         
-        # 3. THE MATH: Subtract the baseline from the current total to get "Session" data
+        # 4. THE MATH
         SESSION_BYTES=$((CURRENT_BYTES - START_BYTES))
         
-        # 4. THE TRIGGER: Check if the NEW session data is over the limit
+        # Optional: Print real-time usage to the screen so you can watch it climb
+        CURRENT_MB=$(awk "BEGIN {printf \"%.2f\", $SESSION_BYTES / 1024 / 1024}")
+        echo -ne "Live Usage: $CURRENT_MB MB / $LIMIT_MB MB\r"
+        
+        # 5. THE TRIGGER
         if [ "$SESSION_BYTES" -ge "$LIMIT_BYTES" ]; then
-            echo "CRITICAL: Session limit of $LIMIT_MB MB reached! Killing all connections NOW."
+            echo -e "\nCRITICAL: Session limit of $LIMIT_MB MB reached!"
             
-            # Turn off the Wi-Fi Antenna
-            networksetup -setairportpower $INTERFACE off
+            # Turn off the Wi-Fi Antenna instantly
+            networksetup -setairportpower "$INTERFACE" off
             
             echo "Internet severed."
             exit 0
         fi
     fi
     
-    sleep 1
+    # Check every half-second to be even more aggressive
+    sleep 0.5
 done

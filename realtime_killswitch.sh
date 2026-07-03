@@ -2,6 +2,9 @@
 
 # --- CONFIGURATION ---
 
+# Define where to save the history file
+LOG_FILE="$HOME/netwatch_history.txt"
+
 # 1. Read the command-line argument OR set a default
 if [ -n "$1" ]; then
     if [[ "$1" =~ ^[0-9]+$ ]]; then
@@ -22,7 +25,6 @@ echo "Connecting to Wi-Fi hardware..."
 
 # Function to read live byte counts directly from the Wi-Fi card
 get_live_bytes() {
-    # netstat -I en0 -b prints hardware data. We grab the Link row and add Input Bytes + Output Bytes
     netstat -I "$INTERFACE" -b | awk '/<Link#/ {print $7 + $10}'
 }
 
@@ -36,6 +38,9 @@ fi
 
 echo "Session monitor active. Starting fresh from 0 MB. Limit: $LIMIT_MB MB."
 
+# LOGGING: Record the start of the session
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] START: Session started with $LIMIT_MB MB limit." >> "$LOG_FILE"
+
 while true; do
     # 3. THE CURRENT TOTAL: Fetch live hardware bytes every second
     CURRENT_BYTES=$(get_live_bytes)
@@ -45,7 +50,7 @@ while true; do
         # 4. THE MATH
         SESSION_BYTES=$((CURRENT_BYTES - START_BYTES))
         
-        # Optional: Print real-time usage to the screen so you can watch it climb
+        # Print real-time usage to the screen so you can watch it climb
         CURRENT_MB=$(awk "BEGIN {printf \"%.2f\", $SESSION_BYTES / 1024 / 1024}")
         echo -ne "Live Usage: $CURRENT_MB MB / $LIMIT_MB MB\r"
         
@@ -55,6 +60,9 @@ while true; do
             
             # Turn off the Wi-Fi Antenna instantly
             networksetup -setairportpower "$INTERFACE" off
+            
+            # LOGGING: Record that the limit was hit and the internet was cut
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] TRIGGER: $LIMIT_MB MB limit reached. Wi-Fi disabled." >> "$LOG_FILE"
             
             echo "Internet severed."
             exit 0
